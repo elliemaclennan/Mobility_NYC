@@ -1,0 +1,94 @@
+---
+title: "NYC Boroughs - Census Mobility Data"
+author: "Ellie Maclennan"
+date: "2024-12-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidycensus)
+library(tigris)
+
+library(tidyverse)
+library(tmap)
+```
+
+
+```{r}
+
+# to explore available variables
+acs5_2022_variables <- load_variables(2022, "acs5", cache = TRUE)
+
+# listing county names for five boroughs
+county_names_nyc <- c("New York", "Bronx", "Queens", "Richmond", "Kings")
+
+# at some point: use table : B07011_001 which has income for movers to assess gentrification 
+
+# listing mobility variables of interest and naming
+mobilityVars <- c(
+    SameHouse_1yr = "B07010_012",
+    Moved_sameCounty = "B07010_023",
+    Moved_sameState = "B07010_034",
+    Moved_difState = "B07010_045",
+    Moved_fromAbroad = "B07010_056"
+    )
+
+# pulling data using tidycensus
+mobility_ct_nyc_2022 <- get_acs(
+  geography = "tract",
+  variables = mobilityVars,
+  summary_var = "B07010_001", 
+  state = "NY",
+  county = county_names_nyc,
+  year = 2022,
+  ) %>%  select(GEOID, NAME, variable, estimate, summary_est)
+
+```
+
+```{r}
+
+# normalizing variables for comparison
+
+pct_mobility_nycBoroughs <- mobility_ct_nyc_2022 %>% 
+    mutate(
+        percent = (estimate / summary_est) * 100) %>% 
+    select(GEOID, NAME, variable, percent) %>% 
+    filter(str_detect(NAME, paste(county_names_nyc, collapse = "|")))
+
+# viewing in wide format 
+boroughs_pct_mobility_wide <- pct_mobility_nycBoroughs %>% 
+    pivot_wider(names_from = variable, values_from = percent) 
+
+
+# getting census tract boundaries with tigris did not use sf feature of tidycensus due to missing data causing plotting issues
+ny_boundary <- tigris::tracts(state = "NY")
+
+# joining with ny census tracts boundary - only keeping matches
+mobility_sf <- ny_boundary %>% 
+    inner_join(boroughs_pct_mobility_wide, by = "GEOID") %>%
+    select(GEOID, tail(names(.), 7))
+
+
+
+```
+
+
+
+```{r}
+# getting names needed
+mobilityVarNames <- names(mobilityVars)
+prettyNames <- c("Same house", "Same County", "Same State", "Different State", "Moved from Abroad")
+
+# creating a function to create the map with the correct title
+mapVars <- function(sfName, featName, title) {
+  tm_shape(sfName) +
+    tm_polygons(col = featName, lwd = 0.1, palette = "Blues", title = title)
+}
+
+# applying the mapping function for each feature with the corresponding title from prettyNames
+map2(mobilityVarNames, prettyNames, ~ mapVars(mobility_sf, .x, .y))
+
+
+``` 
